@@ -1,75 +1,94 @@
 # CAPO — Restaurant Ordering and Management System
 
-Software Engineering group project. This repository includes an **initial database starter** for CAPO.
+Software Engineering group project for the CAPO restaurant. **Database implementation: MongoDB**.
 
-> **Status:** Database schema draft in branch `andrei/database`. It uses **MySQL 8.0+ provisionally**. The team must verify the DBMS, entity names, and application requirements against the approved CAPO class diagram before backend integration.
+The database work is on branch `andrei/database`; `main` remains separate for team integration.
 
-## Database features covered
+## What's implemented
 
-- Staff/admin accounts and roles
-- Customers and restaurant tables
-- Table reservations
-- Digital menu and categories
-- Menu item customization (modifier groups and options)
-- Dine-in, takeout and optional delivery orders
-- Order items, historic prices, payment records and billing queries
+- 8 MongoDB collections: `users`, `customers`, `restaurantTables`, `reservations`, `menuCategories`, `menuItems`, `orders`, `payments`
+- Collection-level **JSON Schema validation**, unique indexes and query indexes
+- Embedded menu modifiers and immutable-by-convention order item price snapshots
+- Repeatable demo data for a menu, reservations, customer order and payment
+- Sample reporting queries, smoke tests and **Docker Compose local MongoDB startup**
 
-## Repository layout
+**This is a runnable local MongoDB database implementation, not an already-hosted MongoDB Atlas cluster.** Actual Atlas provisioning requires an Atlas account and connection.
 
-~~~text
-CAPO/
-├── .env.example
-├── .gitignore
-├── README.md
-├── database/
-│   ├── schema.sql
-│   ├── seed.sql
-│   └── sample_queries.sql
-└── docs/
-    └── ERD.md
-~~~
+## Start the database (easy way)
 
-## How to run locally (MySQL Workbench)
-
-1. Install **MySQL Server 8.0+** and **MySQL Workbench**.
-2. Open and execute `database/schema.sql` to create database `capo_db` and the tables.
-3. **Optional:** execute `database/seed.sql` **one time on an empty database** to insert fictional sample data.
-4. Execute `database/sample_queries.sql` to inspect the results.
-5. Read `docs/ERD.md` for the draft entity-relationship diagram.
-
-You can also use the MySQL CLI:
+Install **Docker Desktop** and ensure it is running. From this branch's repository folder:
 
 ~~~bash
-mysql -u root -p < database/schema.sql
-mysql -u root -p < database/seed.sql
-mysql -u root -p < database/sample_queries.sql
+cp .env.example .env
+# Open .env and set a private MONGO_ROOT_PASSWORD
+docker compose up -d
+docker compose ps
 ~~~
 
-The `.env.example` file documents environment variable names. Keep your real credentials in a local `.env` file and **never commit it**.
+Windows PowerShell: use `Copy-Item .env.example .env` instead of `cp`, then edit `.env`.
 
-## Relationships and API responsibilities
+On first startup, Docker creates `capo_db`, configures validators and indexes, and inserts fictional demo records. MongoDB is accessible on **127.0.0.1:27017**; a named Docker volume keeps your data between restarts.
 
-| Module | Tables |
+### Test the database
+
+~~~bash
+docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/smoke-test.js'
+~~~
+
+### Run sample MongoDB queries
+
+~~~bash
+docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/sample-queries.js'
+~~~
+
+### Connect with MongoDB Compass
+
+Use MongoDB Compass and connect with:
+
+~~~text
+mongodb://capo_root:<YOUR_LOCAL_PASSWORD>@127.0.0.1:27017/capo_db?authSource=admin
+~~~
+
+Replace the password placeholder with your value in `.env` (URL-encode special characters).
+
+### Apply database changes to an existing Docker volume
+
+MongoDB's Docker initialization scripts run **only when the database volume is empty**. Reapply validation rules and indexes after editing the schema:
+
+~~~bash
+docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/init.js'
+~~~
+
+Rerun the seed script if you need any missing demo records (it uses upserts):
+
+~~~bash
+docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/seed.js'
+~~~
+
+**Warning:** `docker compose down -v` deletes the MongoDB volume, including local data. Do not run it on data you need to keep.
+
+## Key files
+
+| File | Purpose |
 | --- | --- |
-| Authentication / Admin | `users` |
-| Customers & Reservations | `customers`, `restaurant_tables`, `reservations` |
-| Digital Menu | `menu_categories`, `menu_items` |
-| Item Customization | `modifier_groups`, `modifier_options` |
-| Order Processing | `orders`, `order_items`, `order_item_modifiers` |
-| Billing / Payments | `orders`, `payments` |
+| `database/mongodb/init.js` | Creates `capo_db`, collections, validators, indexes |
+| `database/mongodb/seed.js` | Inserts fictional test data |
+| `database/mongodb/sample-queries.js` | Menu, bookings, orders, balances, revenue, popular items |
+| `database/mongodb/smoke-test.js` | Tests collections, validators, totals, payment and indexes |
+| `docs/MONGODB-DATA-MODEL.md` | Collection relationships and backend business rules |
+| `docker-compose.yml` | Starts MongoDB 8 locally |
+| `.env.example` | Safe example for local credentials |
 
-Primary and foreign keys model relationships. Financial values use `DECIMAL`. Order item names and prices are stored as billed snapshots.
+## API integration notes
 
-### Important application rules not enforced by this starter SQL
+- Use the **MongoDB Node.js driver** or **Mongoose**, depending on the team's backend.
+- `ObjectId` fields reference other collections; nested menu modifier groups and order items are embedded.
+- Prices are stored as integer centavos: **₱125.00 = 12500**, not floating-point currency.
+- Validate monetary totals, modifier limits, table capacity, reservation overlaps and user authorization in the API.
+- Do not commit `.env`, real connection strings, customer data or passwords to this public repo.
+- Do not expose a database URI in the frontend; access MongoDB **through the backend API**.
+- For production payments and cross-document atomic updates use MongoDB Atlas or another properly configured **replica set** with transactions.
 
-The backend must enforce permissions, password hashing, reservation overlap and table-capacity checks, modifier selection limits, atomic order-total calculations, payment validation, and receipt rules. Real-time order updates require an API transport such as WebSockets or polling; the database does not push updates on its own.
+## Status
 
-## Questions to confirm with CAPO team
-
-1. Is the backend using MySQL, PostgreSQL, or MongoDB?
-2. Is delivery included, or only dine-in and takeout?
-3. Does the approved class diagram match these entities and field names?
-4. What taxes, discounts, reservations, and payment methods are in scope?
-5. Will the team use separate migration files or a single SQL initialization script?
-
-**Contribution workflow:** Do the database work on `andrei/database`, review changes with the backend team, and merge into `main` only when the schema has been agreed upon.
+The initial collections, indexes and seed code have been implemented. The team's approved Trello class diagram and API contract should still be checked for field names and requirements before merging `andrei/database` into `main`. GitHub Actions can exercise the scripts against an ephemeral MongoDB container, but no claim of live Atlas deployment is made.
