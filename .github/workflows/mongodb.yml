@@ -1,0 +1,42 @@
+name: CAPO MongoDB checks
+
+on:
+  push:
+    branches:
+      - andrei/database
+  pull_request:
+    paths:
+      - 'database/mongodb/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/mongodb.yml'
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    env:
+      # Ephemeral test-only password; NOT a production secret.
+      MONGO_ROOT_PASSWORD: github-actions-demo-only
+    steps:
+      - name: Checkout database branch
+        uses: actions/checkout@v4
+      - name: Start real MongoDB container
+        run: |
+          docker compose up -d
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand({ping:1}).ok"' | grep -q 1; then
+              break
+            fi
+            sleep 2
+          done
+      - name: Confirm database initialization and seed data
+        run: |
+          docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/smoke-test.js'
+      - name: Execute sample queries
+        run: |
+          docker compose exec -T mongo sh -lc 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --file /workspace/database/sample-queries.js'
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop and remove test container
+        if: always()
+        run: docker compose down -v
